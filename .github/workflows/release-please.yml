@@ -1,0 +1,43 @@
+# =============================================================================
+# Wersjonowanie bez recznego podbijania
+#
+# release-please czyta conventional commits na `main`, wylicza kolejna wersje
+# i OTWIERA PULL REQUEST z podbita wersja oraz changelogiem.
+#
+# ⚑ Publikacji tu NIE MA. Ten workflow tylko proponuje wersje.
+# Publikuje `publish-ai-toolkit.yml`, dopiero gdy PR wydawniczy zostanie
+# zmergowany do `main`. Moment kontroli zostaje przy czlowieku: zadna wersja
+# nie wychodzi bez swiadomej akceptacji.
+#
+# Typy commitow, ktore cokolwiek zmieniaja:
+#   fix:   -> patch  (0.2.0 -> 0.2.1)
+#   feat:  -> minor  (0.2.0 -> 0.3.0)
+#   feat!: -> major  (0.2.0 -> 1.0.0)   (albo stopka BREAKING CHANGE:)
+#   chore:, docs:, refactor: -> nie tworza wydania
+# =============================================================================
+
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write        # tworzy tag i GitHub Release
+  pull-requests: write   # otwiera PR wydawniczy
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # ⚑ Akcja PINOWANA DO SHA, nie do ruchomego taga `@v4`.
+      # To cudzy kod z prawem zapisu do repozytorium — tag mozna przesunac
+      # na dowolny commit, SHA nie. Ponizszy SHA to commit, na ktory
+      # wskazywal tag v4 (rozwiniety z taga anotowanego).
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # UWAGA: PR utworzony przez GITHUB_TOKEN nie wyzwala innych workflow.
+      # Na PR-ze wydawniczym nie zobaczysz wiec joba walidacji — walidacja
+      # przeszla juz na PR-ach, ktore wniosly tresc.
