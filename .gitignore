@@ -1,0 +1,17 @@
+# Ustawienia IDE — nalezą do maszyny, nie do repozytorium
+.idea/
+.vscode/
+
+# Zaleznosci i artefakty npm
+node_modules/
+*.tgz
+
+# ⚑ .npmrc NIGDY nie wchodzi do repo zrodla prawdy.
+# Lokalnie moze zawierac token do GitHub Packages, a token w historii gita
+# zostaje w niej na zawsze — takze po jego usunieciu z pliku.
+.npmrc
+
+# System
+.DS_Store
+Thumbs.db
+desktop.ini

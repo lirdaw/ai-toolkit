@@ -1,0 +1,125 @@
+# =============================================================================
+# Publikacja paczki @lirdaw/ai-toolkit do GitHub Packages
+#
+# Dwa joby:
+#   validate — sprawdza ksztalt paczki. Chodzi na PR-ach i na push.
+#   publish  — publikuje. Chodzi WYLACZNIE na push do main.
+#
+# Podzial jest celowy: PR ma powiedziec, czy paczka jest poprawna,
+# ale nie ma prawa niczego wydac.
+# =============================================================================
+
+name: Publish AI Toolkit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  # To jedno pole daje przebiegowi prawo zapisu do GitHub Packages.
+  # Dzieki niemu GITHUB_TOKEN — wstrzykiwany automatycznie i wazny tylko
+  # przez ten jeden przebieg — wystarcza do publikacji.
+  # Zaden trwaly sekret nie jest potrzebny.
+  packages: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Walidacja paczki
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # package.json musi byc poprawnym JSON-em. Literowka w przecinku
+      # wychodzi tutaj, a nie przy publikacji.
+      - name: package.json jest poprawnym JSON-em
+        run: node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'))"
+
+      # Paczka bez ladunku nie ma sensu. Sprawdzamy, ze skill istnieje.
+      - name: Ladunek jest na miejscu
+        run: test -f skills/code-review/SKILL.md
+
+      # Nazwa w frontmatterze MUSI zgadzac sie z nazwa katalogu skilla.
+      # Rozjazd miedzy nimi nie wywala niczego od razu — narzedzie po prostu
+      # nie znajduje skilla. To jest dokladnie ten cichy blad, ktory
+      # ta paczka ma eliminowac, wiec lapiemy go w bramce.
+      - name: Nazwa skilla zgadza sie z katalogiem
+        run: |
+          for dir in skills/*/; do
+            name=$(basename "$dir")
+            file="${dir}SKILL.md"
+            test -f "$file" || { echo "brak $file"; exit 1; }
+            declared=$(grep -m1 '^name:' "$file" | sed 's/^name:[[:space:]]*//')
+            if [ "$declared" != "$name" ]; then
+              echo "frontmatter name='$declared' != katalog '$name' w $file"
+              exit 1
+            fi
+          done
+
+      # Reguly NIE MOGA zawierac znacznikow sentinel — inaczej instalator
+      # przy nastepnej aktualizacji zjadlby tresc uzytkownika lezaca
+      # poza blokiem. Instalator tez tego pilnuje, ale lepiej nie wydawac
+      # paczki, ktora i tak zostanie odrzucona u konsumenta.
+      - name: Reguly nie niosa znacznikow sentinel
+        run: |
+          if grep -q -- '<!-- \(BEGIN\|END\) @lirdaw/ai-toolkit -->' rules/CLAUDE.md; then
+            echo "rules/CLAUDE.md zawiera znaczniki sentinel"
+            exit 1
+          fi
+
+      # Sucha probka spakowania. Pokazuje dokladnie te pliki, ktore trafia
+      # do konsumenta — czyli weryfikuje pole "files" z package.json.
+      - name: Probne spakowanie
+        run: npm pack --dry-run
+
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publikacja do GitHub Packages
+    needs: validate
+    # Bez tego warunku paczka probowalaby sie wydac takze z PR-a.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # Te dwa pola przestawiaja npm-a w CI na GitHub Packages
+          # i przygotowuja go na token z NODE_AUTH_TOKEN.
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@lirdaw"
+
+      # GitHub Packages ODRZUCA duplikat wersji bledem 409. Bez tego kroku
+      # kazdy merge, ktory nie podnosi wersji, konczylby sie czerwonym
+      # przebiegiem — a czerwien, ktora nic nie znaczy, uczy zespol
+      # ignorowania czerwieni.
+      - name: Sprawdz, czy ta wersja juz istnieje
+        id: check
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name=$(node -p "require('./package.json').name")
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "juz opublikowana: $name@$version"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "do publikacji: $name@$version"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publikacja
+        if: steps.check.outputs.skip == 'false'
+        env:
+          # Token efemeryczny: GitHub wstrzykuje go sam, wazny tylko przez
+          # ten przebieg. Nie ma go w repo ani w ustawieniach.
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish
