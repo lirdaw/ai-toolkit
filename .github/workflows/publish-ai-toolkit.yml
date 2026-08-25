@@ -106,38 +106,60 @@ jobs:
           scope: "@lirdaw"
 
       # =======================================================================
-      # KONTROLA 1: czy w paczce faktycznie cokolwiek sie zmienilo
+      # BRAMKA WYDANIA — jedno pytanie, dwa etapy
       #
-      # Automatyczne wersjonowanie liczy wersje z TYPOW COMMITOW, a te
-      # potrafia sklamac: literowka w dokumentacji otagowana jako `feat:`
-      # wyda nowa wersje, do ktorej nie weszla zadna realna zmiana.
+      # Punktem odniesienia jest TO, CO LEZY W REJESTRZE, a nie ostatni tag.
+      # Tag zapisuje, co POSTANOWILISMY wydac; rejestr mowi, co konsument
+      # moze dzis pobrac. Te dwie rzeczy potrafia sie rozjechac — i wtedy
+      # bramka oparta na tagu blokuje wydanie, ktore miala przepuscic.
       #
-      # `git diff` nie zna intencji — pokazuje, co naprawde sie zmienilo.
-      # Ta kontrola zabija falszywe wydania z mylnie otagowanych commitow.
-      #
-      # Porownujemy WYLACZNIE tresc jadaca do konsumenta. Samo podbicie
-      # pola `version` w package.json nie jest zmiana paczki — dlatego
-      # metadane porownujemy z pominieciem tego pola.
+      # Etap 1: czy wersja z package.json juz jest w rejestrze?
+      #         (GitHub Packages odrzuca duplikat bledem 409)
+      # Etap 2: czy wzgledem opublikowanej wersji cokolwiek sie zmienilo?
+      #         Automatyczne wersjonowanie liczy wersje z TYPOW COMMITOW,
+      #         a te potrafia sklamac: literowka otagowana jako `feat:`
+      #         wyda wersje bez zadnej realnej zmiany. `git diff` nie zna
+      #         intencji — pokazuje, co naprawde sie zmienilo.
       # =======================================================================
-      - name: Czy zawartosc paczki zmienila sie od ostatniego wydania
-        id: content
+      - name: Bramka wydania
+        id: gate
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          published=$(npm view "$name" version 2>/dev/null || true)
 
-          if [ -z "$tag" ]; then
-            echo "brak wczesniejszych tagow — pierwsze wydanie"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "w package.json: $version"
+          echo "w rejestrze:    ${published:-brak}"
+
+          # --- Etap 1 -----------------------------------------------------
+          if [ "$version" = "$published" ]; then
+            echo "ta wersja juz jest opublikowana — pomijam"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "ostatnie wydanie: $tag"
+
+          # --- Etap 2 -----------------------------------------------------
+          tag="v$published"
+          if [ -z "$published" ] || ! git rev-parse "$tag" >/dev/null 2>&1; then
+            # Opublikowana wersja nie ma odpowiadajacego tagu (np. wydania
+            # sprzed wprowadzenia release-please). Brak punktu odniesienia
+            # to powod, zeby NIE ORZEKAC — przepuszczamy i publikujemy.
+            echo "brak tagu $tag — nie mam z czym porownac, publikuje"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if ! git diff --quiet "$tag"..HEAD -- skills rules install.js uninstall.js README.md; then
-            echo "zmienila sie zawartosc paczki"
+            echo "zmienila sie zawartosc paczki wzgledem $tag:"
             git diff --stat "$tag"..HEAD -- skills rules install.js uninstall.js README.md
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # Samo podbicie pola `version` nie jest zmiana paczki, dlatego
+          # metadane porownujemy jako obiekty z usunietym tym polem.
           git show "$tag":package.json > /tmp/prev-package.json
           if node -e "
             const fs = require('fs');
@@ -146,39 +168,15 @@ jobs:
             delete a.version; delete b.version;
             process.exit(JSON.stringify(a) === JSON.stringify(b) ? 0 : 1);
           "; then
-            echo "poza numerem wersji nic sie nie zmienilo — pomijam publikacje"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "wzgledem $tag nie zmienilo sie nic poza numerem wersji — pomijam"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
           else
             echo "zmienily sie metadane paczki (poza wersja)"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      # =======================================================================
-      # KONTROLA 2: czy ta wersja juz istnieje w rejestrze
-      #
-      # GitHub Packages ODRZUCA duplikat wersji bledem 409. Bez tego kroku
-      # kazdy merge, ktory nie podnosi wersji, konczylby sie czerwonym
-      # przebiegiem — a czerwien, ktora nic nie znaczy, uczy zespol
-      # ignorowania czerwieni.
-      # =======================================================================
-      - name: Sprawdz, czy ta wersja juz istnieje
-        id: check
-        if: steps.content.outputs.changed == 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          version=$(node -p "require('./package.json').version")
-          name=$(node -p "require('./package.json').name")
-          if npm view "$name@$version" version >/dev/null 2>&1; then
-            echo "juz opublikowana: $name@$version"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "do publikacji: $name@$version"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publikacja
-        if: steps.content.outputs.changed == 'true' && steps.check.outputs.skip == 'false'
+        if: steps.gate.outputs.publish == 'true'
         env:
           # Token efemeryczny: GitHub wstrzykuje go sam, wazny tylko przez
           # ten przebieg. Nie ma go w repo ani w ustawieniach.
