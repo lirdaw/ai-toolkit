@@ -43,6 +43,15 @@ Instalacja jest idempotentna: ponowne uruchomienie podmienia treść **wyłączn
 między znacznikami**. Cokolwiek dopiszesz w `CLAUDE.md` poza blokiem, zostaje
 nietknięte.
 
+Aktualizacja **usuwa też artefakty wycofane z paczki**. Instalator czyta stary
+manifest, zanim go nadpisze, i kasuje pliki, które wgrał w poprzedniej wersji,
+a których w bieżącej już nie ma. Bez tego skill usunięty z paczki zostawałby
+u konsumenta na zawsze — nieaktualizowany i niewidoczny dla deinstalatora.
+
+Kasowane jest wyłącznie to, co wypisane w manifeście. Pliki, których paczka
+nigdy nie wgrała, zostają nietknięte, a **nieczytelny manifest wstrzymuje
+sprzątanie** zamiast zgadywać po zawartości katalogu.
+
 ## Deinstalacja
 
 ```bash

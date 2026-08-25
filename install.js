@@ -162,6 +162,88 @@ function installRules(consumerRoot) {
 }
 
 // -----------------------------------------------------------------------------
+// 3b. Sprzatanie po POPRZEDNIEJ wersji paczki
+// -----------------------------------------------------------------------------
+
+function readPreviousManifest(consumerRoot) {
+  const p = path.join(consumerRoot, TOOL_DIR, MANIFEST_NAME);
+  if (!fs.existsSync(p)) return null;
+
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    // ⚑ USZKODZONY MANIFEST: NIE sprzatamy.
+    // Nie wiemy, co paczka kiedys wgrala, wiec kazde kasowanie byloby
+    // zgadywaniem. Lepiej zostawic osierocony plik niz skasowac cudzy.
+    console.error(
+      `[${PACKAGE_NAME}] manifest jest nieczytelny — pomijam sprzatanie po ` +
+        `poprzedniej wersji. Osierocone pliki (jesli sa) usun recznie.`
+    );
+    return null;
+  }
+}
+
+function removeEmptyDirsUpTo(startDir, stopDir) {
+  let dir = startDir;
+  while (dir.startsWith(stopDir) && dir !== stopDir) {
+    if (!fs.existsSync(dir)) {
+      dir = path.dirname(dir);
+      continue;
+    }
+    if (fs.readdirSync(dir).length > 0) break;
+    fs.rmdirSync(dir);
+    dir = path.dirname(dir);
+  }
+}
+
+/**
+ * Usuwa artefakty, ktore paczka wgrala W POPRZEDNIEJ WERSJI, a ktorych
+ * w BIEZACEJ juz nie ma.
+ *
+ * ⚑ PO CO TO ISTNIEJE.
+ * Bez tego kroku skill usuniety z paczki zostaje u konsumenta NA ZAWSZE:
+ * nowa wersja go nie kopiuje (bo go nie ma), a manifest zostaje nadpisany
+ * lista bez niego — wiec deinstalator tez go nie ruszy. Plik dalej steruje
+ * agentem, mimo ze zespol dawno go wycofal. To jest dokladnie ten "cichy
+ * blad", ktoremu ta paczka ma zapobiegac.
+ *
+ * Kasujemy WYLACZNIE pliki wypisane w starym manifescie — czyli tylko to,
+ * co sami kiedys wgralismy. Niczego nie zgadujemy z zawartosci katalogu.
+ */
+function pruneOrphans(consumerRoot, previous, currentSkills) {
+  if (!previous) return [];
+
+  const oldSkills = previous.files?.skills || {};
+  const skillsRoot = path.join(consumerRoot, TOOL_DIR, "skills");
+  const removed = [];
+
+  for (const [skillName, oldEntry] of Object.entries(oldSkills)) {
+    const stillShipped = currentSkills[skillName];
+    const currentFiles = new Set(stillShipped ? stillShipped.files : []);
+    const skillDir = path.join(skillsRoot, skillName);
+
+    for (const relFile of oldEntry.files || []) {
+      // Plik nadal jest w paczce — zostal wlasnie nadpisany swieza wersja.
+      if (currentFiles.has(relFile)) continue;
+
+      const target = path.join(skillDir, relFile);
+      if (!fs.existsSync(target)) continue;
+
+      fs.unlinkSync(target);
+      removed.push(`${skillName}/${relFile}`);
+
+      // Zwijamy od KATALOGU SKASOWANEGO PLIKU, nie od katalogu skilla —
+      // inaczej zagniezdzone katalogi (np. references/) zostaja puste.
+      removeEmptyDirsUpTo(path.dirname(target), skillDir);
+    }
+
+    removeEmptyDirsUpTo(skillDir, skillsRoot);
+  }
+
+  return removed;
+}
+
+// -----------------------------------------------------------------------------
 // 4. Manifest
 // -----------------------------------------------------------------------------
 
@@ -204,7 +286,12 @@ function main() {
     return;
   }
 
+  // Stary manifest czytamy PRZED instalacja — zaraz zostanie nadpisany,
+  // a to jedyne zrodlo wiedzy o tym, co wgrala poprzednia wersja.
+  const previous = readPreviousManifest(consumerRoot);
+
   const skills = installSkills(consumerRoot);
+  const orphans = pruneOrphans(consumerRoot, previous, skills);
   const rulesFile = installRules(consumerRoot);
   writeManifest(consumerRoot, skills, rulesFile);
 
@@ -214,6 +301,13 @@ function main() {
       `${skillNames.length} skill(i): ${skillNames.join(", ") || "brak"}` +
       (rulesFile ? ` + reguly w ${rulesFile}` : "")
   );
+
+  if (orphans.length) {
+    console.log(
+      `[${PACKAGE_NAME}] usunieto ${orphans.length} artefakt(ow) wycofanych ` +
+        `z paczki od wersji ${previous.version}: ${orphans.join(", ")}`
+    );
+  }
 }
 
 try {

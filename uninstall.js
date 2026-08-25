@@ -74,6 +74,9 @@ function removeSkills(consumerRoot, skills) {
       if (fs.existsSync(target)) {
         fs.unlinkSync(target);
         removed.push(path.join(skillName, relFile));
+        // Zwijamy od katalogu skasowanego pliku, zeby zagniezdzone katalogi
+        // (np. references/) nie zostawaly puste.
+        removeEmptyDirsUpTo(path.dirname(target), skillDir);
       } else {
         // Plik z manifestu, ktorego juz nie ma. Nie jest to blad —
         // ktos mogl go skasowac recznie. Notujemy i idziemy dalej.
