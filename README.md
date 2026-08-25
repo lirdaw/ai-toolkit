@@ -46,11 +46,21 @@ nietknięte.
 ## Deinstalacja
 
 ```bash
+npx --package=@lirdaw/ai-toolkit ai-toolkit-uninstall
+```
+
+albo wprost:
+
+```bash
 node node_modules/@lirdaw/ai-toolkit/uninstall.js
 ```
 
 Deinstalator czyta manifest i usuwa dokładnie te pliki, które kiedyś wgrał —
 nie zgaduje po zawartości katalogu. Bez manifestu nie usuwa niczego.
+
+> Deinstalacja ma **własną komendę**. `ai-toolkit uninstall` nie zadziała:
+> komenda `ai-toolkit` wskazuje na instalator i ignoruje argumenty, więc
+> zainstalowałaby paczkę ponownie zamiast ją usunąć.
 
 ## Wydawanie nowej wersji
 

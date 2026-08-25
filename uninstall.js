@@ -4,8 +4,14 @@
 // =============================================================================
 // uninstall.js — deinstalator paczki @lirdaw/ai-toolkit
 //
-// Uruchamiany RECZNIE: `npx @lirdaw/ai-toolkit uninstall`
-// albo `node node_modules/@lirdaw/ai-toolkit/uninstall.js`.
+// Uruchamiany RECZNIE, wlasna komenda:
+//   npx --package=@lirdaw/ai-toolkit ai-toolkit-uninstall
+// albo wprost:
+//   node node_modules/@lirdaw/ai-toolkit/uninstall.js
+//
+// ⚑ To OSOBNY wpis w polu "bin". Komenda `ai-toolkit` wskazuje na instalator
+// i ignoruje argumenty — `ai-toolkit uninstall` ZAINSTALOWALOBY paczke
+// ponownie, zamiast ja usunac.
 //
 // ⚑ NIE jest podpiety pod zaden hook npm. To swiadome: hooki deinstalacyjne
 // menedzera pakietow nie odpalaja sie w kazdym scenariuszu usuwania
