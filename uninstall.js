@@ -17,7 +17,7 @@
 // menedzera pakietow nie odpalaja sie w kazdym scenariuszu usuwania
 // zaleznosci, wiec sprzatanie nie moze na nich polegac.
 //
-// Cala wiedza o tym, CO usunac, pochodzi z MANIFESTU — nie ze zgadywania
+// Cala wiedza o tym, CO usunac, pochodzi z MANIFESTOW — nie ze zgadywania
 // po zawartosci katalogu i nie z tego, co akurat lezy w paczce.
 // =============================================================================
 
@@ -31,8 +31,16 @@ const PACKAGE_NAME = pkg.name;
 const BEGIN = `<!-- BEGIN ${PACKAGE_NAME} -->`;
 const END = `<!-- END ${PACKAGE_NAME} -->`;
 
-const TOOL_DIR = ".claude";
 const MANIFEST_NAME = ".ai-toolkit-manifest.json";
+
+// Ta sama mapa co w instalatorze. Deinstalator przechodzi po WSZYSTKICH
+// profilach — nie zgaduje, ktore byly uzyte, tylko sprawdza, gdzie lezy
+// manifest. Manifest jest dowodem instalacji.
+const PROFILES = {
+  "claude-code": { toolDir: ".claude" },
+  cursor: { toolDir: ".cursor" },
+  codex: { toolDir: ".agents" },
+};
 
 function findConsumerRoot() {
   return process.env.INIT_CWD || process.cwd();
@@ -60,8 +68,8 @@ function removeEmptyDirsUpTo(startDir, stopDir) {
   }
 }
 
-function removeSkills(consumerRoot, skills) {
-  const skillsRoot = path.join(consumerRoot, TOOL_DIR, "skills");
+function removeSkills(consumerRoot, toolDir, skills) {
+  const skillsRoot = path.join(consumerRoot, toolDir, "skills");
   const removed = [];
   const missing = [];
 
@@ -87,7 +95,7 @@ function removeSkills(consumerRoot, skills) {
     removeEmptyDirsUpTo(skillDir, skillsRoot);
   }
 
-  removeEmptyDirsUpTo(skillsRoot, path.join(consumerRoot, TOOL_DIR));
+  removeEmptyDirsUpTo(skillsRoot, path.join(consumerRoot, toolDir));
 
   return { removed, missing };
 }
@@ -142,44 +150,76 @@ function removeRules(consumerRoot, rulesFile) {
   if (!fs.existsSync(target)) return false;
 
   const { text, changed } = stripRulesBlock(fs.readFileSync(target, "utf8"));
-  if (changed) fs.writeFileSync(target, text, "utf8");
+  if (!changed) return false;
 
-  return changed;
+  // Plik regul, ktory po wycieciu bloku nie ma juz nic wlasnego, zalozyla
+  // ta paczka (dotyczy np. `.cursor/rules/ai-toolkit.mdc`). Zabieramy go
+  // ze soba. Plik z jakakolwiek trescia uzytkownika zostaje.
+  if (!text.trim()) {
+    fs.unlinkSync(target);
+    removeEmptyDirsUpTo(path.dirname(target), consumerRoot);
+    return true;
+  }
+
+  fs.writeFileSync(target, text, "utf8");
+  return true;
 }
 
 // -----------------------------------------------------------------------------
 // 3. Przebieg
 // -----------------------------------------------------------------------------
 
-function main() {
-  const consumerRoot = findConsumerRoot();
-  const manifestPath = path.join(consumerRoot, TOOL_DIR, MANIFEST_NAME);
-
-  // Brak manifestu = paczka nie byla tu instalowana ALBO manifest zaginal.
-  // W obu przypadkach nie kasujemy niczego na wyczucie.
-  if (!fs.existsSync(manifestPath)) {
-    console.log(
-      `[${PACKAGE_NAME}] brak manifestu w ${path.join(TOOL_DIR, MANIFEST_NAME)} — ` +
-        `nie ma czego usunac.`
-    );
-    return;
-  }
+function uninstallProfile(consumerRoot, profileName, toolDir) {
+  const manifestPath = path.join(consumerRoot, toolDir, MANIFEST_NAME);
+  if (!fs.existsSync(manifestPath)) return null;
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
-  const { removed, missing } = removeSkills(consumerRoot, manifest.files?.skills);
+  const { removed, missing } = removeSkills(
+    consumerRoot,
+    toolDir,
+    manifest.files?.skills
+  );
   const rulesChanged = removeRules(consumerRoot, manifest.files?.rules);
 
   // Manifest kasujemy NA KONCU. Gdyby cokolwiek wyzej rzucilo bledem,
   // manifest zostaje na miejscu i deinstalacje mozna powtorzyc.
   fs.unlinkSync(manifestPath);
-  removeEmptyDirsUpTo(path.join(consumerRoot, TOOL_DIR), consumerRoot);
+
+  // ⚑ Katalog narzedzia zwijamy TYLKO wtedy, gdy zalozyla go ta paczka.
+  // Katalog, ktory istnial przed instalacja, zostaje — nawet pusty.
+  // Manifesty starszych wersji nie maja tego pola, wiec z ostroznosci
+  // traktujemy je jako "nie nasz".
+  if (manifest.createdToolDir === true) {
+    removeEmptyDirsUpTo(path.join(consumerRoot, toolDir), consumerRoot);
+  }
 
   console.log(
-    `[${PACKAGE_NAME}@${manifest.version}] usunieto ${removed.length} plik(ow)` +
+    `[${PACKAGE_NAME}@${manifest.version}] ${profileName}: usunieto ` +
+      `${removed.length} plik(ow)` +
       (rulesChanged ? ` + blok regul w ${manifest.files.rules}` : "") +
       (missing.length ? ` (${missing.length} plik(ow) juz nie istnialo)` : "")
   );
+
+  return profileName;
+}
+
+function main() {
+  const consumerRoot = findConsumerRoot();
+  const done = [];
+
+  for (const [profileName, cfg] of Object.entries(PROFILES)) {
+    const result = uninstallProfile(consumerRoot, profileName, cfg.toolDir);
+    if (result) done.push(result);
+  }
+
+  // Brak manifestu w ktorymkolwiek profilu = paczka nie byla tu instalowana
+  // ALBO manifesty zaginely. W obu przypadkach nie kasujemy nic na wyczucie.
+  if (!done.length) {
+    console.log(
+      `[${PACKAGE_NAME}] nie znaleziono zadnego manifestu — nie ma czego usunac.`
+    );
+  }
 }
 
 try {

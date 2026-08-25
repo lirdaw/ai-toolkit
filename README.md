@@ -80,20 +80,47 @@ nie zgaduje po zawartości katalogu. Bez manifestu nie usuwa niczego.
 CI waliduje paczkę i publikuje ją do GitHub Packages. Publikacja bez podbicia
 wersji jest pomijana — GitHub Packages odrzuca duplikat wersji.
 
-## Przenośność
+## Wiele narzędzi naraz
 
-Katalog docelowy i nazwa pliku reguł są w `install.js` dwiema stałymi:
+`SKILL.md` jest formatem neutralnym — narzędzia różni wyłącznie katalog
+docelowy i nazwa pliku reguł. Paczka obsługuje trzy profile:
 
-```js
-const TOOL_DIR = ".claude";
-const RULES_FILE = "CLAUDE.md";
+| profil | skille | reguły |
+|---|---|---|
+| `claude-code` | `.claude/skills/` | `CLAUDE.md` |
+| `cursor` | `.cursor/skills/` | `.cursor/rules/ai-toolkit.mdc` |
+| `codex` | `.agents/skills/` | `AGENTS.md` |
+
+**Wybór profilu jest automatyczny.** Instalator wykrywa po śladach w projekcie
+(`.claude/`, `.cursor/`, `.agents/`, `CLAUDE.md`, `AGENTS.md`) i instaluje do
+**wszystkich wykrytych** — bo w jednym repo spotykają się różne narzędzia.
+Gdy nie wykryje nic, używa `claude-code`.
+
+Jawny wybór wygrywa z wykryciem:
+
+```bash
+AI_TOOLKIT_TOOLS=cursor,codex npm install @lirdaw/ai-toolkit
 ```
 
-To jedyne miejsca przywiązane do konkretnego narzędzia. Obsługa Cursora
-(`.cursor/`) czy Codeksa (`.agents/`, `AGENTS.md`) to ich podmiana, nie
-przepisanie instalatora.
+Instalator **nie pyta interaktywnie** — `postinstall` bywa uruchamiany w CI,
+gdzie nie ma komu odpowiedzieć, a pytanie bez odpowiedzi zawiesza instalację.
 
-Podobnie po stronie rejestru: `publishConfig` w `package.json`, `.npmrc`
-konsumenta i job publikujący w CI są jedynymi elementami zależnymi od
-GitHub Packages. Reszta — zawartość paczki, instalator, znaczniki, manifest —
-jest neutralna.
+Dodanie kolejnego narzędzia to dopisanie wiersza do mapy `PROFILES`
+w `install.js`, nie zmiana logiki instalatora.
+
+## Manifest — jeden na narzędzie
+
+Każdy profil ma własny manifest w swoim katalogu (`.claude/`, `.cursor/`,
+`.agents/`). Dzięki temu profile sprzątają niezależnie, a manifest zapisany
+przez wersje sprzed obsługi wielu narzędzi pozostaje poprawnym manifestem
+profilu `claude-code` — bez migracji.
+
+Manifest zapisuje też, **czy katalog narzędzia założyła ta paczka**.
+Deinstalacja zwija go tylko wtedy, gdy tak było; katalog istniejący wcześniej
+zostaje, nawet pusty.
+
+## Przenośność rejestru
+
+`publishConfig` w `package.json`, `.npmrc` konsumenta i job publikujący w CI
+są jedynymi elementami zależnymi od GitHub Packages. Reszta — zawartość paczki,
+instalator, znaczniki, manifest, profile narzędzi — jest neutralna.
