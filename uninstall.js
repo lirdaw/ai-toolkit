@@ -166,6 +166,41 @@ function removeRules(consumerRoot, rulesFile) {
 }
 
 // -----------------------------------------------------------------------------
+// 2b. Mapowanie rejestru w .npmrc
+// -----------------------------------------------------------------------------
+
+/**
+ * Usuwa z `.npmrc` konsumenta linie mapowania rejestru — ale WYLACZNIE te,
+ * ktora dopisal instalator (jest wypisana w manifescie).
+ *
+ * `.npmrc` skonfigurowany przez zespol przed instalacja paczki nie jest
+ * nasz i zostaje nietkniety. Manifest odroznia te dwa przypadki.
+ */
+function removeRegistryMapping(consumerRoot, npmrcLine) {
+  if (!npmrcLine) return false;
+
+  const target = path.join(consumerRoot, ".npmrc");
+  if (!fs.existsSync(target)) return false;
+
+  const original = fs.readFileSync(target, "utf8");
+  const kept = original
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== npmrcLine);
+
+  const next = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+  // Plik, w ktorym po usunieciu naszej linii nie zostalo nic — zalozyla
+  // ta paczka. Zabieramy go ze soba. Plik z inna trescia zostaje.
+  if (!next) {
+    fs.unlinkSync(target);
+    return true;
+  }
+
+  fs.writeFileSync(target, next + "\n", "utf8");
+  return true;
+}
+
+// -----------------------------------------------------------------------------
 // 3. Przebieg
 // -----------------------------------------------------------------------------
 
@@ -181,6 +216,10 @@ function uninstallProfile(consumerRoot, profileName, toolDir) {
     manifest.files?.skills
   );
   const rulesChanged = removeRules(consumerRoot, manifest.files?.rules);
+  const npmrcChanged = removeRegistryMapping(
+    consumerRoot,
+    manifest.files?.npmrcLine
+  );
 
   // Manifest kasujemy NA KONCU. Gdyby cokolwiek wyzej rzucilo bledem,
   // manifest zostaje na miejscu i deinstalacje mozna powtorzyc.
@@ -198,6 +237,7 @@ function uninstallProfile(consumerRoot, profileName, toolDir) {
     `[${PACKAGE_NAME}@${manifest.version}] ${profileName}: usunieto ` +
       `${removed.length} plik(ow)` +
       (rulesChanged ? ` + blok regul w ${manifest.files.rules}` : "") +
+      (npmrcChanged ? " + mapowanie rejestru w .npmrc" : "") +
       (missing.length ? ` (${missing.length} plik(ow) juz nie istnialo)` : "")
   );
 

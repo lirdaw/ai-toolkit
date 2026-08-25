@@ -230,6 +230,60 @@ function installRules(consumerRoot, profile) {
 }
 
 // -----------------------------------------------------------------------------
+// 3c. Mapowanie scope'u w .npmrc konsumenta
+// -----------------------------------------------------------------------------
+
+// Scope i adres rejestru czytamy Z PACZKI, nie wpisujemy recznie.
+// Gdy paczka przeniesie sie na inny rejestr, wystarczy zmienic
+// `publishConfig` — mapowanie u konsumenta pojedzie za nia samo.
+const SCOPE = PACKAGE_NAME.startsWith("@") ? PACKAGE_NAME.split("/")[0] : null;
+const REGISTRY = pkg.publishConfig?.registry || null;
+const REGISTRY_LINE = SCOPE && REGISTRY ? `${SCOPE}:registry=${REGISTRY}` : null;
+
+/**
+ * Dopisuje do `.npmrc` konsumenta jedna linie: ktory rejestr obsluguje
+ * nasz scope. Dzieki temu kazdy, kto sklonuje repo konsumenta, wie skad
+ * brac kolejne wersje — bez czytania README i bez recznej konfiguracji.
+ *
+ * ⚑ CZEGO TU NIE MA I NIGDY NIE BEDZIE: TOKENA.
+ * Ten plik jest commitowany. Token, ktory raz wejdzie do historii gita,
+ * zostaje w niej na zawsze — takze po usunieciu z pliku. Uwierzytelnienie
+ * idzie ze zmiennej srodowiskowej w CI albo z `~/.npmrc` dewelopera.
+ *
+ * Zwraca `true`, jesli linie DOPISALISMY (a nie zastalismy) — deinstalacja
+ * usuwa tylko to, co sama dodala.
+ */
+function ensureRegistryMapping(consumerRoot) {
+  if (!REGISTRY_LINE) return false;
+
+  const target = path.join(consumerRoot, ".npmrc");
+  const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
+
+  // Idempotencja: porownujemy po CALEJ linii, nie po fragmencie. Inaczej
+  // `@lirdaw-tools:registry=...` zostalby uznany za nasze mapowanie.
+  const lines = existing.split(/\r?\n/).map((l) => l.trim());
+  if (lines.includes(REGISTRY_LINE)) return false;
+
+  // Odmawiamy, gdy ten sam scope jest juz zmapowany GDZIE INDZIEJ.
+  // Ciche nadpisanie cudzego mapowania przekierowaloby instalacje
+  // wszystkich paczek tego scope'u na inny rejestr.
+  const conflicting = lines.find(
+    (l) => l.startsWith(`${SCOPE}:registry=`) && l !== REGISTRY_LINE
+  );
+  if (conflicting) {
+    throw new Error(
+      `.npmrc konsumenta mapuje juz ${SCOPE} na inny rejestr:\n  ${conflicting}\n` +
+        `Rozstrzygnij to recznie — nie nadpisuje cudzej konfiguracji rejestru.`
+    );
+  }
+
+  const next = existing.trim() ? `${existing.trimEnd()}\n${REGISTRY_LINE}\n` : `${REGISTRY_LINE}\n`;
+  fs.writeFileSync(target, next, "utf8");
+
+  return true;
+}
+
+// -----------------------------------------------------------------------------
 // 3b. Sprzatanie po POPRZEDNIEJ wersji paczki
 // -----------------------------------------------------------------------------
 
@@ -329,7 +383,8 @@ function writeManifest(
   profileName,
   skills,
   rulesFile,
-  createdToolDir
+  createdToolDir,
+  npmrcLine
 ) {
   const dir = path.join(consumerRoot, profile.toolDir);
   fs.mkdirSync(dir, { recursive: true });
@@ -348,6 +403,9 @@ function writeManifest(
     files: {
       skills,
       rules: rulesFile,
+      // Linia mapowania rejestru, JESLI dopisala ja ta paczka.
+      // `null` = plik `.npmrc` byl skonfigurowany wczesniej — nie ruszamy go.
+      npmrcLine,
     },
   };
 
@@ -362,7 +420,7 @@ function writeManifest(
 // 5. Przebieg
 // -----------------------------------------------------------------------------
 
-function installForProfile(consumerRoot, profileName) {
+function installForProfile(consumerRoot, profileName, addedMapping) {
   const profile = PROFILES[profileName];
 
   // Stary manifest czytamy PRZED instalacja — zaraz zostanie nadpisany,
@@ -380,13 +438,21 @@ function installForProfile(consumerRoot, profileName) {
   const orphans = pruneOrphans(consumerRoot, profile, previous, skills);
   const rulesFile = installRules(consumerRoot, profile);
 
+  // Mapowanie w `.npmrc` jest jedno na repo, ale zapisujemy je w manifescie
+  // kazdego profilu — deinstalacja pierwszego profilu, ktory je napotka,
+  // usunie linie, a pozostale zastana ja juz nieobecna.
+  const npmrcLine = addedMapping
+    ? REGISTRY_LINE
+    : previous?.files?.npmrcLine || null;
+
   writeManifest(
     consumerRoot,
     profile,
     profileName,
     skills,
     rulesFile,
-    createdToolDir
+    createdToolDir,
+    npmrcLine
   );
 
   const names = Object.keys(skills);
@@ -422,8 +488,17 @@ function main() {
     `[${PACKAGE_NAME}] narzedzia: ${profiles.join(", ")} (${source})`
   );
 
+  // Mapowanie rejestru jest wspolne dla calego repo konsumenta, nie per
+  // narzedzie — dlatego poza petla profili.
+  const addedMapping = ensureRegistryMapping(consumerRoot);
+  if (addedMapping) {
+    console.log(
+      `[${PACKAGE_NAME}] dopisano mapowanie rejestru do .npmrc: ${REGISTRY_LINE}`
+    );
+  }
+
   for (const profileName of profiles) {
-    installForProfile(consumerRoot, profileName);
+    installForProfile(consumerRoot, profileName, addedMapping);
   }
 }
 
