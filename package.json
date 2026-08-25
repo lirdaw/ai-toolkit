@@ -1,6 +1,6 @@
 {
   "name": "@lirdaw/ai-toolkit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Wersjonowana paczka artefaktow AI dystrybuowana przez GitHub Packages",
   "license": "UNLICENSED",
   "type": "commonjs",
