@@ -16,21 +16,34 @@ kod: z wersją, historią i kontrolowaną instalacją.
 
 ## Instalacja u konsumenta
 
-W repozytorium konsumenta, jednorazowo — mapowanie scope'a w `.npmrc`:
+Odczyt z GitHub Packages wymaga uwierzytelnienia — także dla paczek
+publicznych, i **wyłącznie tokenem klasycznym** z zakresem `read:packages`
+(tokeny fine-grained nie są obsługiwane przez rejestr npm). Jednorazowo:
 
+```bash
+npm login --scope=@lirdaw --registry=https://npm.pkg.github.com --auth-type=legacy
 ```
-@lirdaw:registry=https://npm.pkg.github.com
-```
-
-Ten plik jest commitowany i **nie zawiera tokena**. Odczyt z GitHub Packages
-wymaga uwierzytelnienia: lokalnie przez `npm login --scope=@lirdaw
---registry=https://npm.pkg.github.com`, w CI przez zmienną środowiskową.
 
 Następnie:
 
 ```bash
 npm install @lirdaw/ai-toolkit
 ```
+
+Mapowania scope'u **nie musisz konfigurować ręcznie** — instalator dopisuje je
+do `.npmrc` repozytorium konsumenta:
+
+```
+@lirdaw:registry=https://npm.pkg.github.com
+```
+
+Dzięki temu każdy, kto sklonuje to repo, wie skąd brać kolejne wersje.
+Plik jest commitowany i **nigdy nie zawiera tokena**: token, który raz wejdzie
+do historii gita, zostaje w niej na zawsze. Uwierzytelnienie idzie ze zmiennej
+środowiskowej w CI albo z `~/.npmrc` dewelopera.
+
+Instalator **nie nadpisze cudzej konfiguracji**: gdy ten sam scope jest już
+zmapowany na inny rejestr, odmawia i każe rozstrzygnąć to ręcznie.
 
 `postinstall` uruchamia `install.js`, który:
 
@@ -73,12 +86,24 @@ nie zgaduje po zawartości katalogu. Bez manifestu nie usuwa niczego.
 
 ## Wydawanie nowej wersji
 
-1. Zmień zawartość `skills/` albo `rules/`.
-2. Podbij `version` w `package.json`.
-3. Merge do `main`.
+Wersji **nie podbija się ręcznie**.
 
-CI waliduje paczkę i publikuje ją do GitHub Packages. Publikacja bez podbicia
-wersji jest pomijana — GitHub Packages odrzuca duplikat wersji.
+1. Zmień zawartość paczki i zacommituj w konwencji conventional commits
+   (`fix:` → patch, `feat:` → minor, `feat!:` → major).
+2. Merge do `main`.
+3. `release-please` otwiera **PR z podbitą wersją i changelogiem**.
+4. Akceptujesz i mergujesz ten PR → CI publikuje nową wersję.
+
+Moment kontroli zostaje przy człowieku: żadna wersja nie wychodzi bez świadomej
+akceptacji.
+
+Przed publikacją job sprawdza **dwie rzeczy**:
+
+- czy pliki wchodzące do paczki **faktycznie zmieniły się** od ostatniego tagu
+  — commit potrafi skłamać o swojej intencji, `git diff` pokazuje, co realnie
+  się zmieniło (samo podbicie `version` się nie liczy),
+- czy ta wersja **nie istnieje już** w rejestrze — GitHub Packages odrzuca
+  duplikat błędem 409.
 
 ## Wiele narzędzi naraz
 
